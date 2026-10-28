@@ -1,0 +1,258 @@
+# API própria do Barber Hub — Python/FastAPI 1.7.0
+
+## Objetivo
+
+A API não substitui o Supabase. Ela é a camada de servidor controlada pelo Barber Hub para validação, autenticação de rotas, regras de negócio sensíveis, rate limiting, auditoria e integrações futuras.
+
+```text
+Desktop / Mobile / PWA
+          ↓ JSON + Bearer
+     /api/v1 — FastAPI
+          ↓
+Supabase Auth + PostgreSQL/PostgREST + RPC
+```
+
+### Regra simples de responsabilidade
+
+1. **Leitura pública**: catálogo, perfil público, horários publicados e avaliações passam por rotas públicas que retornam somente dados próprios para visitantes.
+2. **Escrita autenticada**: agendamento, avaliação, favorito, suporte e dados pessoais exigem `Bearer` de uma conta confirmada.
+3. **Operação do negócio**: a API valida o contrato e envia o token do próprio usuário ao Supabase; o RLS confirma que ele é dono ou integrante autorizado.
+4. **Administração e jobs**: somente `admin` ativo ou segredo de job. A chave secreta do Supabase nunca é entregue ao navegador.
+
+Em outras palavras: a API concentra regras, contrato e mensagens seguras; o Supabase é a fonte de identidade, dados, RLS, RPC, Storage e Realtime.
+
+## Estrutura
+
+```text
+api/index.py                 rotas, erros, request id e logging
+api/routers/                 rotas modulares de conta, catálogo e sistema
+backend/config.py            variáveis de ambiente
+backend/domain/              regras puras executáveis offline
+backend/models.py            contratos Pydantic
+backend/security.py          sessão/admin/e-mail confirmado
+backend/rate_limit.py        rate limiting distribuído
+backend/supabase.py          gateway HTTP assíncrono
+backend/services/catalog.py  marketplace/FTS
+backend/services/appointments.py agendamentos
+backend/services/schedule.py Agenda 2.0
+backend/services/crm.py         fichas e notas de clientes
+backend/services/finance.py     lançamentos, comissões e fechamento
+backend/services/team.py        acessos e papéis operacionais
+backend/services/retention.py   espera, recorrência, fidelidade, cupons e campanhas
+backend/services/growth.py      insights, oportunidades, metas e permissões
+backend/services/management.py  estabelecimento/serviços/profissionais/promoções sob RLS
+backend/services/support.py  suporte
+backend/services/admin.py    overview/health/auditoria/recuperação/assinaturas
+backend/services/imports.py  prévia, confirmação e histórico de importação
+backend/services/push.py     assinatura, preferências e fila Web Push
+backend/services/account.py  sessões, exportação e exclusão da própria conta
+backend/services/email_delivery.py fila e entrega de e-mail por job protegido
+backend/services/maintenance.py retenção e manutenção operacional
+backend/services/system.py   disponibilidade e prontidão
+backend/services/audit.py    trilha operacional paginada
+backend/services/flags.py    avaliação autorizada de feature flags
+```
+
+## Endpoints 1.7.0
+
+| Método | Rota | Acesso | Responsabilidade |
+|---|---|---|---|
+| GET | `/api/v1/health` | público | estado/runtime/versão |
+| GET | `/api/v1/public-config` | público + rate limit | configuração segura de navegador (site key pública) |
+| GET | `/api/v1/catalog/summary` | público | indicadores agregados |
+| GET | `/api/v1/marketplace/search` | público | FTS, filtros, ranking e paginação |
+| GET | `/api/v1/marketplace/featured` | público | destaques Barber Hub |
+| GET | `/api/v1/marketplace/regional` | público | busca regional, raio e distância paginada |
+| GET | `/api/v1/catalog/cover-library` | público | biblioteca oficial de capas |
+| GET | `/api/v1/establishments/{id}/public` | público | perfil público curado para visitantes, sem dados de gestão |
+| POST | `/api/v1/appointments` | autenticado | criar agendamento multi-serviço |
+| PATCH | `/api/v1/appointments/{id}/status` | dono/admin sob RLS | confirmar/concluir/recusar/cancelar |
+| DELETE | `/api/v1/appointments/{id}` | autenticado | cancelar agendamento permitido |
+| PATCH | `/api/v1/establishments/{id}` | dono sob RLS | editar dados/configurações do próprio estabelecimento |
+| PATCH | `/api/v1/establishments/{id}/status` | dono sob RLS | status Automático/Aberto/Fechado |
+| GET | `/api/v1/establishments/{id}/entitlements` | dono/admin | plano efetivo, limites e benefícios cumulativos |
+| POST | `/api/v1/services` | dono sob RLS | criar serviço com validação Pydantic |
+| PATCH | `/api/v1/services/{id}` | dono sob RLS | editar serviço |
+| DELETE | `/api/v1/services/{id}` | dono sob RLS | arquivar serviço sem quebrar histórico |
+| POST | `/api/v1/professionals` | dono sob RLS | adicionar profissional |
+| PATCH | `/api/v1/professionals/{id}` | dono sob RLS | editar profissional |
+| DELETE | `/api/v1/professionals/{id}` | dono sob RLS | arquivar profissional sem quebrar histórico |
+| POST | `/api/v1/promotions` | dono sob RLS + entitlement | criar promoção pública |
+| PATCH | `/api/v1/promotions/{id}` | dono sob RLS + entitlement | editar/ativar promoção |
+| DELETE | `/api/v1/promotions/{id}` | dono sob RLS | desativar promoção |
+| GET | `/api/v1/support/tickets` | autenticado | tickets do usuário |
+| POST | `/api/v1/support/tickets` | autenticado | abrir ticket vinculado à própria conta |
+| DELETE | `/api/v1/account` | autenticado | compatibilidade para exclusão da própria conta |
+| GET | `/api/v1/admin/overview` | admin | totais globais |
+| GET | `/api/v1/admin/records/{resource}` | admin | busca e paginação de recursos permitidos |
+| GET | `/api/v1/admin/health` | admin | saúde API/DB/Auth + versão |
+| POST | `/api/v1/admin/users/{id}/password-recovery` | admin | recuperação de senha + auditoria |
+| GET | `/api/v1/admin/subscriptions` | admin | workspace de planos, estabelecimentos e assinaturas |
+| PATCH | `/api/v1/admin/establishments/{id}/subscription` | admin | atribuir plano/status/validade e recalcular benefícios |
+| GET | `/api/v1/admin/navigation-audit` | admin | estado do mapa interno |
+
+### Conta, catálogo e operação adicionados na 1.7.0
+
+| Método | Rota | Acesso | Responsabilidade |
+|---|---|---|---|
+| GET | `/api/v1/account/deletion` | autenticado | consultar pedido e prazo de cancelamento |
+| POST | `/api/v1/account/deletion` | autenticado + reautenticação | solicitar exclusão com trilha e período de segurança |
+| DELETE | `/api/v1/account/deletion` | autenticado | cancelar pedido dentro do prazo |
+| GET | `/api/v1/account/export` | autenticado | exportar dados próprios permitidos |
+| GET | `/api/v1/account/sessions` | autenticado | listar sessões de forma sanitizada |
+| DELETE | `/api/v1/account/sessions/others` | autenticado | encerrar outras sessões |
+| DELETE | `/api/v1/account/sessions` | autenticado | encerrar todas as sessões da conta |
+| GET | `/api/v1/establishments/{id}/reviews` | público | avaliações paginadas, filtro `source=all|verified|community` e agregado correto |
+| GET | `/api/v1/health/live` | público | processo disponível |
+| GET | `/api/v1/health/ready` | público | dependências essenciais prontas |
+| GET/POST | `/api/v1/jobs/email/deliver` | job com Bearer secreto | reivindicar e entregar fila de e-mail |
+| GET/POST | `/api/v1/jobs/maintenance/run` | job com Bearer secreto | retenção e exclusões pendentes |
+
+### Operação adicionada na 1.4.0
+
+| Método | Rota | Acesso | Responsabilidade |
+|---|---|---|---|
+| GET | `/api/v1/schedule/range` | equipe + entitlement | agenda e bloqueios no período |
+| POST | `/api/v1/schedule/walk-ins` | equipe + entitlement | encaixe transacional |
+| POST/DELETE | `/api/v1/schedule/blocks` | equipe autorizada | criar/remover bloqueio |
+| PATCH | `/api/v1/appointments/{id}/reschedule` | equipe autorizada | reagendamento com histórico |
+| PATCH | `/api/v1/appointments/{id}/confirmation` | parte autorizada | confirmação/recusa |
+| PATCH | `/api/v1/appointments/{id}/no-show` | equipe autorizada | registrar falta |
+| GET/PATCH | `/api/v1/crm/clients` | equipe + CRM | pesquisar e atualizar fichas |
+| POST | `/api/v1/crm/clients/{id}/notes` | equipe + CRM | anotação interna |
+| GET | `/api/v1/finance/summary` | gestão + financeiro | resumo do período |
+| GET | `/api/v1/finance/entries` | gestão + financeiro | lançamentos do período |
+| POST | `/api/v1/finance/adjustments` | gestão + financeiro | ajuste justificado |
+| POST | `/api/v1/finance/closings` | proprietário/gerente/admin | fechamento diário |
+| GET/POST/PATCH | `/api/v1/finance/commission-rules` | gestão + comissões | regras percentuais/fixas |
+| GET/POST/PATCH | `/api/v1/team/members` | proprietário/gerente/admin | vínculo e estado dos acessos |
+
+### Retenção e inteligência adicionadas na 1.5.0
+
+| Método | Rota | Acesso | Responsabilidade |
+|---|---|---|---|
+| GET/POST/PATCH | `/api/v1/retention/waitlist` | cliente/equipe sob RLS | entrar, acompanhar e tratar lista de espera |
+| POST | `/api/v1/appointments/{id}/recurrence` | gestão + plano | criar série recorrente transacional |
+| GET | `/api/v1/retention/recurrences` | cliente/equipe sob RLS | listar séries visíveis |
+| GET/PUT | `/api/v1/retention/loyalty` e `/program` | gestão + fidelidade | visão e configuração do programa |
+| POST/PATCH | `/api/v1/retention/loyalty/rewards` | gestão + fidelidade | recompensas e resgate |
+| GET | `/api/v1/client/loyalty` | cliente autenticado | saldos e recompensas visíveis da própria carteira |
+| GET/POST/PATCH | `/api/v1/retention/coupons` | gestão + cupons | regras, validade e ativação de cupons |
+| GET/POST | `/api/v1/retention/campaigns` | Elite + campanhas | segmentação e fila de mensagens |
+| GET/PATCH | `/api/v1/team/.../permissions` | membro/proprietário | capacidades efetivas e overrides Elite |
+| GET | `/api/v1/growth/insights` | Elite + crescimento | indicadores consolidados do período |
+| GET/PATCH | `/api/v1/growth/opportunities` | Elite + crescimento | recalcular, listar e tratar oportunidades |
+| GET/POST/PATCH | `/api/v1/growth/goals` | Profissional+ + metas | metas e progresso mensurável |
+
+### Operação real e lançamento adicionados na 1.6.0
+
+| Método | Rota | Acesso | Responsabilidade |
+|---|---|---|---|
+| GET/PUT | `/api/v1/schedule/opening-periods` | gestão da agenda | listar/substituir múltiplos períodos |
+| POST | `/api/v1/schedule/manual-services` | gestão da agenda | atendimento manual com serviço existente ou avulso |
+| POST | `/api/v1/finance/expenses` | gestão financeira | registrar gasto idempotente |
+| PUT | `/api/v1/establishments/{id}/location` | proprietário/gerente | localização estruturada do negócio |
+| POST | `/api/v1/imports/preview` | gestão autorizada | validar CSV/XLSX antes de gravar |
+| POST | `/api/v1/imports/{id}/commit` | gestão autorizada | confirmar importação uma única vez |
+| GET | `/api/v1/imports` | gestão autorizada | histórico paginado de importações |
+| GET | `/api/v1/push/config` | autenticado | configuração pública e disponibilidade de Push |
+| POST/DELETE | `/api/v1/push/subscriptions` | autenticado | registrar/remover dispositivo |
+| GET/PUT | `/api/v1/push/preferences` | autenticado | categorias e horário silencioso |
+| GET/POST | `/api/v1/jobs/push/deliver` | job com Bearer secreto | entrega em lote, silêncio, retries e limpeza de assinaturas expiradas |
+| GET | `/api/v1/audit/operational` | gestão autorizada | auditoria operacional paginada |
+| POST | `/api/v1/features/evaluate` | autenticado | capacidades e flags efetivas sem expor regras internas |
+
+Swagger: `/api/docs`  
+OpenAPI executável: `/api/openapi.json`
+
+## Assinaturas e entitlements — 1.8/1.9
+
+A API 1.7.0 mantém as assinaturas e capacidades acumuladas das versões anteriores. O proprietário consulta o plano efetivo por `/establishments/{id}/entitlements`; o administrador altera a assinatura pela rota administrativa. A escrita chama a RPC idempotente `admin_atribuir_plano_111`, registra o evento e recalcula os benefícios de forma transacional.
+
+Os limites críticos não dependem apenas do frontend: agenda, profissionais, promoções e portfólio também são validados no PostgreSQL. Assinaturas pausadas, canceladas, atrasadas ou vencidas caem para o conjunto de benefícios do Perfil gratuito sem apagar o histórico do estabelecimento.
+
+## Busca do marketplace
+
+Exemplo:
+
+```text
+GET /api/v1/marketplace/search?q=degradê+centro&status=aberta&agenda=true&offset=0&limit=24
+```
+
+A RPC `buscar_marketplace` usa FTS como mecanismo principal e `ILIKE` como fallback. O backend retorna `items`, `total`, `offset`, `limit`, `has_more` e `search_engine`.
+
+## Respostas
+
+Sucesso:
+
+```json
+{"success":true,"data":{}}
+```
+
+Erro:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Revise os dados informados.",
+    "details": []
+  }
+}
+```
+
+Cada resposta da API recebe `X-Request-ID` e `X-Barber-Hub-API` quando processada pelo middleware.
+
+## Rate limiting
+
+A migration 15 cria `api_rate_limits` + `consumir_api_rate_limit`. O contador fica no PostgreSQL para funcionar com múltiplas instâncias serverless.
+
+429 inclui `Retry-After` quando disponível.
+
+## Variáveis da Vercel
+
+```text
+SUPABASE_URL
+SUPABASE_PUBLISHABLE_KEY
+SUPABASE_SECRET_KEY
+BARBER_HUB_ALLOWED_ORIGINS
+BARBER_HUB_PASSWORD_REDIRECT_URL
+BARBER_HUB_TURNSTILE_SITE_KEY
+BARBER_HUB_VAPID_PUBLIC_KEY
+```
+
+`SUPABASE_SECRET_KEY` é exclusiva do servidor.
+
+## Concorrência
+
+A API usa `async`/`await` e `httpx.AsyncClient`. Para o perfil atual, o principal trabalho é I/O (rede/PostgREST/Auth), portanto concorrência assíncrona é mais apropriada que criar threads por request. Threads/processos devem ser introduzidos apenas para tarefas CPU-bound ou após medição.
+
+## Senhas
+
+Não existe endpoint para exibir senha. O Supabase Auth mantém o hash bcrypt em `auth.users.encrypted_password`; esse valor não é reversível e não é duplicado no schema `public`. A recuperação administrativa envia um fluxo seguro ao e-mail do titular.
+
+## Regras offline
+
+Os módulos `backend/domain/appointments.py`, `plans.py`, `schedule.py`, `crm.py`, `finance.py`, `retention.py`, `growth.py`, `permissions.py`, `operations.py` e `imports.py` não dependem de serviços externos. Use `npm run check:offline` para validar transições, agenda, classificação, comissões, recorrência, cupons, importação, métricas e papéis sem Supabase, Vercel ou FastAPI Cloud.
+
+## Escritas de gestão e dupla validação
+
+As rotas de estabelecimento, serviços, profissionais e promoções usam o **token do usuário** ao falar com o PostgREST. Assim, a entrada é validada em Python/Pydantic e o PostgreSQL RLS continua sendo uma segunda barreira de autorização de propriedade. A `SUPABASE_SECRET_KEY` não é usada para contornar RLS nessas rotas. Exclusões de serviço/profissional são arquivamentos lógicos para preservar agendamentos históricos.
+
+## Modernização — adições locais da etapa 1 (22/10/2026)
+
+A entrada ASGI continua em `api/index.py`; rotas ficam em `api/routers/` e schemas em `backend/schemas/`. Os contratos anteriores são protegidos por `tests/contracts/openapi-baseline.json`. O OpenAPI executável continua sendo a fonte dos contratos.
+
+| Método e rota | Autorização | Resultado |
+| --- | --- | --- |
+| `GET /api/v1/account/profile` | Sessão válida e conta ativa | Perfil do próprio usuário |
+| `PATCH /api/v1/admin/users/{user_id}` | Administrador ativo | Altera `tipo` e/ou `estado_conta` |
+| `DELETE /api/v1/admin/users/{user_id}` | Administrador ativo | Exclusão lógica (`estado_conta=excluida`) |
+| `POST /api/v1/admin/users/{user_id}/restore` | Administrador ativo | Restaura o estado ativo, exigindo novo login do titular |
+
+O PATCH aceita apenas `tipo` (`admin`, `barbeiro`, `cliente`) e `estado_conta` (`ativa`, `desativada`, `suspensa`, `excluida`). Campos desconhecidos, payload vazio e valores nulos são rejeitados. A própria conta administrativa é protegida. Estado, papel e auditoria mudam atomicamente; a sessão do alvo é revogada quando há mudança efetiva. O banco protege o último administrador ativo.
+
+Erros relevantes: `ACCOUNT_INACTIVE` (403), `INVALID_SESSION` (401), `SELF_ACCOUNT_CHANGE` (409), `LAST_ACTIVE_ADMIN` (409), `ACCOUNT_NOT_FOUND` (404). As rotas administrativas têm cota de 30 alterações por minuto por administrador.
+
+Esta implementação depende da migration `20261022155131_modernizacao_contas_administrativas.sql`, ainda pendente de homologação e aplicação remota. Consulte [o relatório da etapa](modernizacao/ETAPA_1.md) antes de publicar.

@@ -1,0 +1,11 @@
+{
+  "name": "barber-hub-api-checks",
+  "private": true,
+  "version": "1.7.0",
+  "scripts": {
+    "check:database": "node --test tests/database/accounts.test.js"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.11"
+  }
+}

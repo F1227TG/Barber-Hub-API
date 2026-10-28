@@ -1,0 +1,62 @@
+"""Environment configuration for the API.
+
+Only this module reads environment variables. Keeping access centralized makes
+it easier to audit the project and prevents secret keys from leaking into the
+browser bundle.
+"""
+
+from dataclasses import dataclass
+import os
+
+
+def _split_origins(value: str) -> list[str]:
+    return [item.strip().rstrip("/") for item in value.split(",") if item.strip()]
+
+
+def _enabled(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+@dataclass(frozen=True)
+class Settings:
+    supabase_url: str
+    publishable_key: str
+    secret_key: str
+    allowed_origins: list[str]
+    password_redirect_url: str
+    turnstile_site_key: str
+    vapid_public_key: str
+    vapid_private_key: str
+    vapid_subject: str
+    external_notifications_enabled: bool
+    cron_secret: str
+    jobs_secret: str
+    email_api_url: str
+    email_api_key: str
+    email_from: str
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.supabase_url and self.publishable_key and self.secret_key)
+
+
+settings = Settings(
+    supabase_url=os.getenv("SUPABASE_URL", "").rstrip("/"),
+    publishable_key=os.getenv("SUPABASE_PUBLISHABLE_KEY", os.getenv("SUPABASE_ANON_KEY", "")),
+    secret_key=os.getenv("SUPABASE_SECRET_KEY", os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")),
+    allowed_origins=_split_origins(os.getenv("BARBER_HUB_ALLOWED_ORIGINS", "")),
+    password_redirect_url=os.getenv(
+        "BARBER_HUB_PASSWORD_REDIRECT_URL",
+        "https://www.barberhuboficial.com.br/html/redefinir-senha.html",
+    ),
+    turnstile_site_key=os.getenv("BARBER_HUB_TURNSTILE_SITE_KEY", "").strip(),
+    vapid_public_key=os.getenv("BARBER_HUB_VAPID_PUBLIC_KEY", "").strip(),
+    vapid_private_key=os.getenv("BARBER_HUB_VAPID_PRIVATE_KEY", "").strip(),
+    vapid_subject=os.getenv("BARBER_HUB_VAPID_SUBJECT", "").strip(),
+    external_notifications_enabled=_enabled(os.getenv("BARBER_HUB_EXTERNAL_NOTIFICATIONS_ENABLED", "")),
+    cron_secret=os.getenv("CRON_SECRET", "").strip(),
+    jobs_secret=os.getenv("BARBER_HUB_JOBS_SECRET", "").strip(),
+    email_api_url=os.getenv("BARBER_HUB_EMAIL_API_URL", "").strip(),
+    email_api_key=os.getenv("BARBER_HUB_EMAIL_API_KEY", "").strip(),
+    email_from=os.getenv("BARBER_HUB_EMAIL_FROM", "").strip(),
+)

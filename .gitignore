@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+.vercel/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+node_modules/
+test-results/
+dist/
+build/
+supabase/.temp/
