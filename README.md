@@ -2,6 +2,24 @@
 
 Backend independente do Barber Hub: FastAPI, regras de negócio, integração Supabase, migrations e testes. Extraído de `F1227TG/Barber-Hub-Oficial` em 27/10/2026. Não contém interface web nem credenciais.
 
+## Iniciar no Windows usando a .venv existente
+
+No Explorador de Arquivos ou terminal do Windows, execute `run-api.cmd` na raiz do repositório. O script usa somente `.venv\Scripts\python.exe`, valida Python 3.13/3.14, tenta instalar dependências faltantes usando `uv pip` (ou `pip`) e inicia a API em `http://127.0.0.1:8000/api/docs`. Ele não recria a venv e não altera suas credenciais.
+
+Em PowerShell:
+
+```powershell
+.\run-api.cmd
+```
+
+Se preferir iniciar manualmente:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn api.index:app --reload
+```
+
+Atenção: o módulo é **uvicorn** (não `unicorn`). Se o instalador falhar, consulte a saída completa do terminal para identificar erro de versão, rede, permissão ou certificado. Configure `.env` localmente para os endpoints integrados ao Supabase; não envie segredos ao GitHub.
+
 ## Desenvolvimento
 
 Python 3.13 e uv:
